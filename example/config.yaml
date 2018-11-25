@@ -1,0 +1,4 @@
+datasources:
+- url: "http://localhost:9090"
+  resolution: '1m'
+  # retention: '1d' # optional
