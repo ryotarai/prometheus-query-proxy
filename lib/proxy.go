@@ -69,6 +69,9 @@ func (p *Proxy) handleQueryRange(rw http.ResponseWriter, req *http.Request) {
 
 		if ds.Retention != zero {
 			retentionStart := time.Now().Add(ds.Retention * -1)
+			if ds.StartTime != (time.Time{}) && retentionStart.Before(ds.StartTime) {
+				retentionStart = ds.StartTime
+			}
 			if start.Before(retentionStart) || end.Before(retentionStart) {
 				continue
 			}
@@ -108,6 +111,9 @@ func (p *Proxy) handleQuery(rw http.ResponseWriter, req *http.Request) {
 
 		if ds.Retention != zero {
 			retentionStart := time.Now().Add(ds.Retention * -1)
+			if ds.StartTime != (time.Time{}) && retentionStart.Before(ds.StartTime) {
+				retentionStart = ds.StartTime
+			}
 			if t.Before(retentionStart) {
 				continue
 			}

@@ -17,10 +17,12 @@ type DatasourceConfig struct {
 	URLStr        string `yaml:"url"`
 	ResolutionStr string `yaml:"resolution"`
 	RetentionStr  string `yaml:"retention"`
+	StartTimeStr  string `yaml:"startTime"`
 
 	URL        *url.URL      `yaml:"-"`
 	Resolution time.Duration `yaml:"-"`
 	Retention  time.Duration `yaml:"-"`
+	StartTime  time.Time     `yaml:"-"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -82,6 +84,14 @@ func (c *Config) parse() error {
 				return err
 			}
 			ds.URL = u
+		}
+
+		if ds.StartTimeStr != "" {
+			t, err := time.Parse(time.RFC3339, ds.StartTimeStr)
+			if err != nil {
+				return err
+			}
+			ds.StartTime = t
 		}
 	}
 
