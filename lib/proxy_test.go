@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -192,4 +193,63 @@ func TestProxyLabelNameValues(t *testing.T) {
 	b, err := ioutil.ReadAll(resp.Body)
 	assert.NoError(t, err)
 	assert.Equal(t, `{"status":"success","data":["ds1//api/v1/label/foo/values","ds2//api/v1/label/foo/values","foo"]}`+"\n", string(b))
+}
+
+func TestProxySeries(t *testing.T) {
+	ds1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"status": "success", "data": [
+			{"a": "b", "c": "d"},
+			{"e": "f"}
+		]}`)
+	}))
+	defer ds1.Close()
+	ds2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"status": "success", "data": [
+			{"a": "b", "c": "d"},
+			{"g": "h"}
+		]}`)
+	}))
+	defer ds2.Close()
+
+	url1, _ := url.Parse(ds1.URL)
+	url2, _ := url.Parse(ds2.URL)
+
+	config := &Config{
+		Datasources: []*DatasourceConfig{
+			{
+				URL:        url1,
+				Resolution: time.Minute,
+			},
+			{
+				URL:        url2,
+				Resolution: time.Minute,
+			},
+		},
+	}
+	proxy := NewProxy(config)
+	proxyServer := httptest.NewServer(proxy)
+
+	u, _ := url.Parse(fmt.Sprintf("%s/api/v1/series", proxyServer.URL))
+	resp, err := proxyServer.Client().Get(u.String())
+	assert.NoError(t, err)
+
+	b, err := ioutil.ReadAll(resp.Body)
+	assert.NoError(t, err)
+
+	r := seriesResponse{}
+	err = json.Unmarshal(b, &r)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "success", r.Status)
+	assert.Equal(t, 3, len(r.Data))
+	assert.Contains(t, r.Data, map[string]string{
+		"a": "b",
+		"c": "d",
+	})
+	assert.Contains(t, r.Data, map[string]string{
+		"e": "f",
+	})
+	assert.Contains(t, r.Data, map[string]string{
+		"g": "h",
+	})
 }

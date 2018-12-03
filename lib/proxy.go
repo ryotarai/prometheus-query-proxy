@@ -34,6 +34,8 @@ func (p *Proxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		p.handleQueryRange(rw, req)
 	} else if req.URL.Path == "/api/v1/query" {
 		p.handleQuery(rw, req)
+	} else if req.URL.Path == "/api/v1/series" {
+		p.handleSeries(rw, req)
 	} else if labelValuesPathRe.MatchString(req.URL.Path) {
 		p.handleLabelNameValues(rw, req)
 	} else {
@@ -203,6 +205,77 @@ func (p *Proxy) handleLabelNameValues(rw http.ResponseWriter, req *http.Request)
 	log.Printf("request: %s", req.URL.String())
 }
 
+type seriesResponse struct {
+	Status string              `json:"status"`
+	Data   []map[string]string `json:"data"`
+}
+
+func (p *Proxy) handleSeries(rw http.ResponseWriter, req *http.Request) {
+	// TODO: unify with handleLabelNameValues
+	var wg sync.WaitGroup
+	var mutex sync.Mutex
+
+	merged := []map[string]string{}
+	for _, ds := range p.config.Datasources {
+		wg.Add(1)
+		go func(ds *DatasourceConfig) {
+			u := *ds.URL
+			u.Path = singleJoiningSlash(u.Path, req.URL.Path)
+			r, err := http.NewRequest("GET", u.String(), http.NoBody)
+			c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			r = r.WithContext(c)
+			resp, err := http.DefaultClient.Do(r)
+			if err != nil {
+				log.Printf("Error getting %s: %s", u.String(), err)
+				return
+			}
+			if resp.StatusCode != 200 {
+				log.Printf("Error getting %s: status code %d", u.String(), resp.StatusCode)
+			}
+
+			sr := seriesResponse{}
+			d := json.NewDecoder(resp.Body)
+			d.Decode(&sr)
+			resp.Body.Close()
+			if sr.Status != "success" {
+				log.Printf("Ignoring response from %s because status is %s", u.String(), sr.Status)
+			}
+
+			for _, s := range sr.Data {
+				mutex.Lock()
+				found := false
+				for _, m := range merged {
+					if equalStringMap(s, m) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					merged = append(merged, s)
+				}
+				mutex.Unlock()
+			}
+			defer wg.Done()
+		}(ds)
+	}
+	wg.Wait()
+
+	sr := seriesResponse{
+		Status: "success",
+		Data:   merged,
+	}
+	e := json.NewEncoder(rw)
+	err := e.Encode(sr)
+	if err != nil {
+		rw.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(rw, "Error serializing to JSON: %s\n", err)
+		return
+	}
+
+	log.Printf("request: %s", req.URL.String())
+}
+
 func singleJoiningSlash(a, b string) string {
 	aslash := strings.HasSuffix(a, "/")
 	bslash := strings.HasPrefix(b, "/")
@@ -227,13 +300,13 @@ func parsePromTime(s string) (time.Time, error) {
 			return zero, err
 		}
 		return time.Unix(0, int64(f*1000*1000*1000)), nil
-	} else {
-		t, err := time.Parse(time.RFC3339, s)
-		if err != nil {
-			return zero, err
-		}
-		return t, nil
 	}
+
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return zero, err
+	}
+	return t, nil
 }
 
 func parsePromDuration(s string) (time.Duration, error) {
@@ -244,11 +317,27 @@ func parsePromDuration(s string) (time.Duration, error) {
 			return zero, err
 		}
 		return time.Duration(int64(f * 1000 * 1000 * 1000)), nil
-	} else {
-		d, err := time.ParseDuration(s)
-		if err != nil {
-			return zero, err
-		}
-		return d, nil
 	}
+
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return zero, err
+	}
+	return d, nil
+}
+
+func equalStringMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		vv, ok := b[k]
+		if !ok {
+			return false
+		}
+		if v != vv {
+			return false
+		}
+	}
+	return true
 }
