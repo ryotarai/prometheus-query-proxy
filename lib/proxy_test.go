@@ -197,10 +197,11 @@ func TestProxyLabelNameValues(t *testing.T) {
 
 func TestProxySeries(t *testing.T) {
 	ds1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"status": "success", "data": [
+		fmt.Fprintf(w, `{"status": "success", "data": [
 			{"a": "b", "c": "d"},
-			{"e": "f"}
-		]}`)
+			{"e": "f"},
+			{"query": "%s"}
+		]}`, r.URL.RawQuery)
 	}))
 	defer ds1.Close()
 	ds2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +230,7 @@ func TestProxySeries(t *testing.T) {
 	proxy := NewProxy(config)
 	proxyServer := httptest.NewServer(proxy)
 
-	u, _ := url.Parse(fmt.Sprintf("%s/api/v1/series", proxyServer.URL))
+	u, _ := url.Parse(fmt.Sprintf("%s/api/v1/series?match[]=foo&match[]=bar", proxyServer.URL))
 	resp, err := proxyServer.Client().Get(u.String())
 	assert.NoError(t, err)
 
@@ -241,7 +242,7 @@ func TestProxySeries(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, "success", r.Status)
-	assert.Equal(t, 3, len(r.Data))
+	assert.Equal(t, 4, len(r.Data))
 	assert.Contains(t, r.Data, map[string]string{
 		"a": "b",
 		"c": "d",
@@ -251,5 +252,8 @@ func TestProxySeries(t *testing.T) {
 	})
 	assert.Contains(t, r.Data, map[string]string{
 		"g": "h",
+	})
+	assert.Contains(t, r.Data, map[string]string{
+		"query": "match[]=foo&match[]=bar",
 	})
 }

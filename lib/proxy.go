@@ -221,6 +221,7 @@ func (p *Proxy) handleSeries(rw http.ResponseWriter, req *http.Request) {
 		go func(ds *DatasourceConfig) {
 			u := *ds.URL
 			u.Path = singleJoiningSlash(u.Path, req.URL.Path)
+			u.RawQuery = req.URL.RawQuery
 			r, err := http.NewRequest("GET", u.String(), http.NoBody)
 			c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
